@@ -18,4 +18,6 @@ The tools have the corresponding `exe` in the `dist` folder. It's mainly for win
 ### <u>frid</u>
 A cli-tool to run you `avd` via its name(Only the ones setup via android studio)(Have to do for others) and then start the frida server on it (saved as `frida-server` on the emulator)
 
+Make sure to have the path for `emulator.exe` in your environment variable. You can find it at :- `C:\Users\<Username>\AppData\Local\Android\Sdk\emulator`
+
 usage :- `frid <avd_name>`
