@@ -47,7 +47,17 @@ def main():
     
     compile_cmd = f'cmd /c "\"{vcvarsall}\" x64 && cl /I\"{qbdi_include}\" /MD /EHsc \"{cpp_file}\" \"{qbdi_lib}\""'
     
-    subprocess.run(compile_cmd, shell=True)
+    os.system(compile_cmd)
 
+    # Remove the obj file created
+    try:
+        temp = cpp_file.replace("\\", "").replace(".cpp", ".obj")
+        if temp[0] == ".":
+            temp = temp[1:]
+
+        os.system(f"del {temp}")
+    except Exception as e:
+        print(e)
+        
 if __name__ == "__main__":
     main()
