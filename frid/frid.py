@@ -44,7 +44,7 @@ def adb_root(target_serial):
 
 
 def main():
-    print("Welcome to Frida AVD Launcher!")
+    print("Welcome to Frida AVD Launcher!!!")
     print("This script will start an AVD and run Frida server on it")
     avd = sys.argv[1].strip()
     if not avd:
