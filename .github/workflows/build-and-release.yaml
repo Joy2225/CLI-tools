@@ -57,6 +57,7 @@ jobs:
           done
 
       - name: Commit built tools
+        shell: bash
         run: |
           if git diff --quiet tools/; then
             echo "No changes in tools. Skipping commit."
