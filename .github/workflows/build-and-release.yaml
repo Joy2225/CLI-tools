@@ -23,11 +23,34 @@ jobs:
         id: detect
         shell: bash
         run: |
+          set -euo pipefail
+
+          echo "Ensuring full git history (if needed)..."
           git fetch --prune --unshallow || true
-          base_ref=$(git rev-parse HEAD^)
-          changed_tools=$(git diff --name-only $base_ref HEAD | grep -E '^([^/]+)/\1\.py$' | cut -d/ -f1 | sort -u)
+
+          # Determine base ref safely
+          if git rev-parse HEAD^ &>/dev/null; then
+            base_ref=$(git rev-parse HEAD^)
+          else
+            base_ref=$(git rev-list --max-parents=0 HEAD)
+          fi
+
+          echo "Using base ref: $base_ref"
+
+          # Detect changed tool directories containing a tool-named .py file
+          changed_files=$(git diff --name-only "$base_ref" HEAD || true)
+
+          changed_tools=$(
+            echo "$changed_files" |
+            grep -E '^([^/]+)/\1\.py$' |
+            cut -d/ -f1 |
+            sort -u || true
+          )
+
           echo "Changed tools: $changed_tools"
-          echo "changed_tools=$changed_tools" >> $GITHUB_OUTPUT
+
+          # Fail-safe export (even if empty)
+          echo "changed_tools=${changed_tools:-}" >> $GITHUB_OUTPUT
 
       - name: Build changed tools
         if: steps.detect.outputs.changed_tools != ''
