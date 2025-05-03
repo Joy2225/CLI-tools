@@ -1,89 +1,154 @@
-name: Auto Build & Release Tools
+name: Build and Release CLI Tools
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # Manual trigger
 
 jobs:
-  build-and-release:
-    runs-on: windows-latest
-
+  build_and_release:
+    runs-on: windows-latest # Build .exe files
     permissions:
-      contents: write  # Required for GitHub release creation
+      contents: write # Needed to create releases and tags
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0 # Required to compare commits/tags
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.x' # Use a suitable Python version
 
-      - name: Install dependencies
+      - name: Install PyInstaller
         run: pip install pyinstaller
 
-      - name: Detect changed or unreleased tools
-        id: detect
-        shell: bash
+      # --- Logic to Identify Tools to Build ---
+      - name: Identify tools and changes
+        id: identify_tools
+        shell: bash # Use bash for easier scripting, even on Windows runners
         run: |
-          git fetch --prune --unshallow || true
+          echo "Finding potential tools..."
+          tools_to_build=""
+          found_tools=()
+          # Find directories D where D/D.py exists
+          for dir in */; do
+            dir_name=$(basename "$dir")
+            py_file="${dir_name}/${dir_name}.py"
+            if [[ -f "$py_file" ]]; then
+              echo "Found potential tool: $dir_name"
+              found_tools+=("$dir_name")
+            fi
+          done
 
-          if git rev-parse HEAD^ &>/dev/null; then
-            base_ref=$(git rev-parse HEAD^)
+          echo "Checking for changes..."
+          # Get latest tag
+          latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          if [[ -z "$latest_tag" ]]; then
+            echo "No previous tag found. Building all found tools."
+            tools_to_build=$(IFS=,; echo "${found_tools[*]}")
           else
-            base_ref=$(git rev-list --max-parents=0 HEAD)
+            echo "Comparing against latest tag: $latest_tag"
+            changed_files=$(git diff --name-only $latest_tag HEAD)
+            echo "Changed files since $latest_tag:"
+            echo "$changed_files"
+
+            build_list=()
+            for tool in "${found_tools[@]}"; do
+              py_file="${tool}/${tool}.py"
+               # Check if the tool's py file or requirements changed
+              if echo "$changed_files" | grep -q -E "^${tool}/${tool}\.py$" || \
+                 echo "$changed_files" | grep -q -E "^${tool}/requirements\.txt$"; then
+                 echo "Tool '$tool' needs rebuild."
+                 build_list+=("$tool")
+              else
+                 echo "Tool '$tool' unchanged. Skipping build."
+              fi
+            done
+            tools_to_build=$(IFS=,; echo "${build_list[*]}")
           fi
 
-          changed=$(git diff --name-only "$base_ref" HEAD | grep -E '^([^/]+)/\1\.py$' | cut -d/ -f1 | sort -u || true)
+          if [[ -z "$tools_to_build" ]]; then
+            echo "No tools need rebuilding."
+            echo "build_required=false" >> $GITHUB_OUTPUT
+            echo "tools_built=" >> $GITHUB_OUTPUT
+          else
+            echo "Tools to build: $tools_to_build"
+            echo "build_required=true" >> $GITHUB_OUTPUT
+            echo "tools_built=$tools_to_build" >> $GITHUB_OUTPUT
+          fi
 
-          unreleased=()
-          for tool_exe in tools/*.exe; do
-            [ -e "$tool_exe" ] || continue
-            tool=$(basename "$tool_exe" .exe)
-            if ! gh release list --limit 100 | grep -q "^${tool}-v"; then
-              unreleased+=("$tool")
-            fi
-          done
-
-          all_tools=$(echo -e "$changed\n${unreleased[@]}" | sort -u)
-          echo "Tools to build/release: $all_tools"
-
-          echo "tools_to_release=${all_tools}" >> $GITHUB_OUTPUT
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and release tools
-        if: steps.detect.outputs.tools_to_release != ''
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # --- Build Loop ---
+      - name: Build Tools
+        if: steps.identify_tools.outputs.build_required == 'true'
         run: |
-          for tool in ${{ steps.detect.outputs.tools_to_release }}; do
-            echo "Processing $tool..."
-            cd "$tool" || continue
+          # Create tools directory if it doesn't exist
+          mkdir -p tools
 
-            pip install -r requirements.txt || true
-            pyinstaller --onefile "$tool.py"
+          # Convert comma-separated string back to array (PowerShell specific)
+          $tools = "${{ steps.identify_tools.outputs.tools_built }}".Split(',')
+          foreach ($tool in $tools) {
+            if (-not [string]::IsNullOrEmpty($tool)) {
+              Write-Host "Building tool: $tool"
+              cd $tool
+              if (Test-Path requirements.txt) {
+                Write-Host "Installing requirements for $tool..."
+                pip install -r requirements.txt
+              } else {
+                Write-Host "No requirements.txt found for $tool."
+              }
+              Write-Host "Running PyInstaller for $tool..."
+              pyinstaller --onefile --clean "${tool}.py"
+              Write-Host "Moving executable for $tool..."
+              # Ensure the tools directory exists relative to the original working directory
+              $targetDir = Join-Path $env:GITHUB_WORKSPACE 'tools'
+              New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+              Move-Item -Path "dist/${tool}.exe" -Destination $targetDir -Force
+              cd ..
+              Write-Host "Finished building $tool."
+            }
+          }
+        shell: pwsh # Use PowerShell for Windows compatibility
 
-            exe_path="dist/$tool.exe"
-            mkdir -p ../tools
-            cp "$exe_path" ../tools/
+      # --- Versioning and Release ---
+      - name: Calculate Next Version
+        id: calc_version
+        # Only run if we actually built something
+        if: steps.identify_tools.outputs.build_required == 'true'
+        shell: bash
+        run: |
+          latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "Latest tag: $latest_tag"
+          # Basic semver increment (patch) - assumes vX.Y.Z format
+          # More robust parsing might be needed for complex tags
+          if [[ "$latest_tag" == "v0.0.0" ]]; then
+             new_tag="v0.1.0" # First release
+          else
+             # Use awk for safer incrementing
+             new_tag=$(echo "$latest_tag" | awk -F. -v OFS=. '{$NF++;print}')
+          fi
+          echo "Calculated new tag: $new_tag"
+          echo "new_tag=$new_tag" >> $GITHUB_OUTPUT
 
-            cd ..
+      - name: Create Release
+        id: create_release
+        # Only run if we actually built something
+        if: steps.identify_tools.outputs.build_required == 'true'
+        uses: softprops/action-gh-release@v2 # Updated to v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.calc_version.outputs.new_tag }}
+          name: Release ${{ steps.calc_version.outputs.new_tag }}
+          body: |
+            Automated release of updated tools.
+            Tools updated in this release: ${{ steps.identify_tools.outputs.tools_built }}
+          draft: false
+          prerelease: false
+          files: |
+            tools/*.exe # Upload all executables from the tools directory
 
-            # Determine next tag
-            prefix="${tool}-v"
-            existing_tags=$(gh release list --limit 100 --json tagName -q '.[].tagName' | grep "^$prefix" | sort -V)
-            if [[ -z "$existing_tags" ]]; then
-              version="${prefix}1.0.0"
-            else
-              latest=$(echo "$existing_tags" | tail -n1 | sed "s/^$prefix//")
-              IFS='.' read -r major minor patch <<< "$latest"
-              patch=$((patch + 1))
-              version="${prefix}${major}.${minor}.${patch}"
-            fi
-
-            echo "Creating release: $version"
-            gh release create "$version" "tools/$tool.exe" --title "$tool $version" --notes "Auto-release for $tool"
-          done
+      - name: No Build Needed Notification (Optional)
+        if: steps.identify_tools.outputs.build_required == 'false'
+        run: echo "No tools required rebuilding. Skipping release."
