@@ -52,6 +52,7 @@ jobs:
           done
 
       - name: Commit updated tools
+        shell: bash
         id: commit
         run: |
           git config --global user.name "GitHub Actions"
@@ -66,6 +67,7 @@ jobs:
           fi
 
       - name: Check existing releases
+        shell: bash
         id: check-releases
         run: |
           if gh release list --limit 1 | grep -q .; then
@@ -77,6 +79,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check for existing tools
+        shell: bash
         id: check-tools
         run: |
           if ls tools/*.exe 1> /dev/null 2>&1; then
