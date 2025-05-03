@@ -1,0 +1,69 @@
+name: Build and Release CLI Tools
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller
+
+      - name: Detect changed tools
+        id: detect
+        shell: bash
+        run: |
+          git fetch --prune --unshallow || true
+          base_ref=$(git rev-parse HEAD^)
+          changed_tools=$(git diff --name-only $base_ref HEAD | grep -E '^([^/]+)/\1\.py$' | cut -d/ -f1 | sort -u)
+          echo "Changed tools: $changed_tools"
+          echo "changed_tools=$changed_tools" >> $GITHUB_OUTPUT
+
+      - name: Build changed tools
+        if: steps.detect.outputs.changed_tools != ''
+        shell: bash
+        run: |
+          mkdir -p tools
+          for tool in ${{ steps.detect.outputs.changed_tools }}; do
+            echo "Building $tool..."
+            cd $tool
+            pyinstaller --onefile "$tool.py"
+            cp "dist/$tool.exe" ../tools/
+            cd ..
+          done
+
+      - name: Generate new version tag
+        id: version
+        shell: bash
+        run: |
+          git fetch --tags
+          latest=$(git tag --sort=-v:refname | grep '^v' | head -n 1)
+          if [[ -z "$latest" ]]; then
+            next="v1.0.0"
+          else
+            base=${latest#v}
+            IFS='.' read -r major minor patch <<< "$base"
+            patch=$((patch + 1))
+            next="v$major.$minor.$patch"
+          fi
+          echo "Next version: $next"
+          echo "next_version=$next" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.next_version }}
+          name: Release ${{ steps.version.outputs.next_version }}
+          files: tools/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
