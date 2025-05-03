@@ -25,7 +25,7 @@ jobs:
 
       - name: Get changed files
         id: changed-files
-        shell: bash  # <--- ADD THIS TO FORCE BASH
+        shell: bash
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
             git diff --name-only ${{ github.event.before }} ${{ github.sha }} > changed_files.txt
@@ -36,7 +36,7 @@ jobs:
           echo "CHANGED_FILES=$(cat changed_files.txt)" >> $GITHUB_ENV
 
       - name: Build tools
-        shell: bash  # <--- ADD THIS FOR CONSISTENCY
+        shell: bash
         run: |
           mkdir -p tools
           for tool_dir in buildqbdi frid; do
@@ -66,30 +66,30 @@ jobs:
             echo "HAS_CHANGES=false" >> $GITHUB_ENV
           fi
 
-      - name: Check existing releases
+      - name: Check unreleased tools
         shell: bash
-        id: check-releases
+        id: check-unreleased
         run: |
-          if gh release list --limit 1 | grep -q .; then
-            echo "RELEASE_EXISTS=true" >> $GITHUB_ENV
-          else
-            echo "RELEASE_EXISTS=false" >> $GITHUB_ENV
-          fi
+          CURRENT_TOOLS=$(ls tools/*.exe 2>/dev/null | xargs -n1 basename)
+          echo "Current tools: $CURRENT_TOOLS"
+          
+          RELEASED_ASSETS=$(gh release list --limit 100 | awk '{print $1}' | xargs -I{} gh release view {} --json assets --jq '.assets[].name' | tr '\n' ' ')
+          echo "Released assets: $RELEASED_ASSETS"
+          
+          MISSING_TOOLS=""
+          for tool in $CURRENT_TOOLS; do
+            if [[ ! " $RELEASED_ASSETS " =~ " $tool " ]]; then
+              MISSING_TOOLS+="$tool "
+            fi
+          done
+          
+          echo "UNRELEASED_TOOLS=${MISSING_TOOLS%% }" >> $GITHUB_ENV
+          echo "NEEDS_RELEASE=$([ -n "$MISSING_TOOLS" ] && echo "true" || echo "false")" >> $GITHUB_ENV
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Check for existing tools
-        shell: bash
-        id: check-tools
-        run: |
-          if ls tools/*.exe 1> /dev/null 2>&1; then
-            echo "TOOLS_EXIST=true" >> $GITHUB_ENV
-          else
-            echo "TOOLS_EXIST=false" >> $GITHUB_ENV
-          fi
-
       - name: Create Release
-        if: (env.HAS_CHANGES == 'true' || (env.TOOLS_EXIST == 'true' && env.RELEASE_EXISTS == 'false'))
+        if: env.HAS_CHANGES == 'true' || env.NEEDS_RELEASE == 'true'
         uses: softprops/action-gh-release@v1
         with:
           name: "Release $(date +'%Y.%m.%d')-$(git rev-parse --short HEAD)"
