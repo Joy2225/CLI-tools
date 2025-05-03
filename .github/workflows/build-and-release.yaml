@@ -87,10 +87,10 @@ jobs:
           name: tools
           path: tools/
 
-      - name: Set up GitHub CLI
-        uses: actions/setup-cli@v2
-        with:
-          tool: gh
+      - name: Install GitHub CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install gh
 
       - name: Generate version tag
         id: version
