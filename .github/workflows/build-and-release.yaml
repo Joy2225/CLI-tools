@@ -5,6 +5,9 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -55,11 +58,15 @@ jobs:
 
       - name: Commit built tools
         run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          git add tools/
-          git commit -m "Add built tools"
-          git push
+          if git diff --quiet tools/; then
+            echo "No changes in tools. Skipping commit."
+          else
+            git config user.name "GitHub Actions"
+            git config user.email "actions@github.com"
+            git add tools/
+            git commit -m "Add built tools"
+            git push
+          fi
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
