@@ -53,51 +53,29 @@ jobs:
             fi
           done
 
-      - name: Commit updated tools
-        shell: bash
-        id: commit
-        run: |
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
-          git add tools/
-          if ! git diff --cached --quiet; then
-            git commit -m "Update built tools"
-            git push
-            echo "HAS_CHANGES=true" >> $GITHUB_ENV
-          else
-            echo "HAS_CHANGES=false" >> $GITHUB_ENV
-          - name: Release tools
-            run: |
-              tools_dir="tools"
-              for tool_path in "$tools_dir"/*.exe; do
-            tool_name=$(basename "$tool_path" .exe)
-            release_tag="${tool_name}-v1.0.0"
+      - name: Auto-release all tools with version increment
+  shell: bash
+  run: |
+    tools_dir="tools"
+    repo="${{ github.repository }}"
 
-            # Check if release exists
-            release_info=$(gh release view "$release_tag" --json id,assets --repo "${{ github.repository }}" 2>/dev/null || echo "Not Found")
+    # Get latest version tag starting with tools-v*
+    latest_tag=$(gh release list --repo "$repo" --limit 100 | grep '^tools-v' | cut -f1 | sort -V | tail -n1)
 
-            if [ "$release_info" = "Not Found" ]; then
-              echo "Creating new release for $tool_name..."
-              gh release create "$release_tag" "$tool_path" --title "$tool_name v1.0.0" --notes "Initial release of $tool_name" --repo "${{ github.repository }}"
-            else
-              release_id=$(echo "$release_info" | jq -r '.id')
-              asset_url=$(echo "$release_info" | jq -r ".assets[] | select(.name == \"$(basename "$tool_path")\") | .url")
+    if [ -z "$latest_tag" ]; then
+      next_version="tools-v1.0.0"
+    else
+      # Extract major, minor, patch and increment patch
+      version="${latest_tag#tools-v}"  # Strip 'tools-v'
+      IFS='.' read -r major minor patch <<< "$version"
+      patch=$((patch + 1))
+      next_version="tools-v$major.$minor.$patch"
+    fi
 
-              if [ -n "$asset_url" ]; then
-                echo "Checking if $tool_name needs an update..."
-                asset_updated_at=$(echo "$release_info" | jq -r ".assets[] | select(.name == \"$(basename "$tool_path")\") | .updated_at")
-                tool_mtime=$(date -r "$tool_path" --iso-8601=seconds)
+    echo "Creating new release: $next_version"
 
-                if [[ "$tool_mtime" > "$asset_updated_at" ]]; then
-              echo "Updating $tool_name..."
-              gh release delete-asset "$release_id" "$(basename "$tool_path")" --repo "${{ github.repository }}"
-              gh release upload "$release_tag" "$tool_path" --repo "${{ github.repository }}"
-                else
-              echo "No updates for $tool_name, skipping..."
-                fi
-              else
-                echo "Adding $tool_name to existing release..."
-                gh release upload "$release_tag" "$tool_path" --repo "${{ github.repository }}"
-              fi
-            fi
-              done
+    # Create release with all tools
+    gh release create "$next_version" "$tools_dir"/*.exe \
+      --title "Tools ${next_version#tools-v}" \
+      --notes "Release of all tools (auto-versioned)" \
+      --repo "$repo"
