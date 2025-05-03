@@ -39,14 +39,16 @@ jobs:
         shell: bash
         run: |
           mkdir -p tools
-          for tool_dir in buildqbdi frid; do
-            py_file="$tool_dir/$tool_dir.py"
-            if grep -q "$py_file" <<< "$CHANGED_FILES"; then
+          for tool_dir in */; do
+            py_dir="$tool_dir"
+            py_file="${py_dir%/}.py"
+
+            if grep -q "$py_dir" <<< "$CHANGED_FILES" && [ -f "$py_dir/$py_file" ]; then
               echo "Building $tool_dir..."
               cd $tool_dir
               pip install -r requirements.txt
               pyinstaller --onefile $tool_dir.py
-              mv "dist/$tool_dir.exe" "../tools/"
+              mv "dist/${tool_dir%/}.exe" "../tools/"
               cd ..
             fi
           done
@@ -64,36 +66,38 @@ jobs:
             echo "HAS_CHANGES=true" >> $GITHUB_ENV
           else
             echo "HAS_CHANGES=false" >> $GITHUB_ENV
-          fi
+          - name: Release tools
+            run: |
+              tools_dir="tools"
+              for tool_path in "$tools_dir"/*.exe; do
+            tool_name=$(basename "$tool_path" .exe)
+            release_tag="${tool_name}-v1.0.0"
 
-      - name: Check unreleased tools
-        shell: bash
-        id: check-unreleased
-        run: |
-          CURRENT_TOOLS=$(ls tools/*.exe 2>/dev/null | xargs -n1 basename)
-          echo "Current tools: $CURRENT_TOOLS"
-          
-          RELEASED_ASSETS=$(gh release list --limit 100 | awk '{print $1}' | xargs -I{} gh release view {} --json assets --jq '.assets[].name' | tr '\n' ' ')
-          echo "Released assets: $RELEASED_ASSETS"
-          
-          MISSING_TOOLS=""
-          for tool in $CURRENT_TOOLS; do
-            if [[ ! " $RELEASED_ASSETS " =~ " $tool " ]]; then
-              MISSING_TOOLS+="$tool "
+            # Check if release exists
+            release_info=$(gh release view "$release_tag" --json id,assets --repo "${{ github.repository }}" 2>/dev/null || echo "Not Found")
+
+            if [ "$release_info" = "Not Found" ]; then
+              echo "Creating new release for $tool_name..."
+              gh release create "$release_tag" "$tool_path" --title "$tool_name v1.0.0" --notes "Initial release of $tool_name" --repo "${{ github.repository }}"
+            else
+              release_id=$(echo "$release_info" | jq -r '.id')
+              asset_url=$(echo "$release_info" | jq -r ".assets[] | select(.name == \"$(basename "$tool_path")\") | .url")
+
+              if [ -n "$asset_url" ]; then
+                echo "Checking if $tool_name needs an update..."
+                asset_updated_at=$(echo "$release_info" | jq -r ".assets[] | select(.name == \"$(basename "$tool_path")\") | .updated_at")
+                tool_mtime=$(date -r "$tool_path" --iso-8601=seconds)
+
+                if [[ "$tool_mtime" > "$asset_updated_at" ]]; then
+              echo "Updating $tool_name..."
+              gh release delete-asset "$release_id" "$(basename "$tool_path")" --repo "${{ github.repository }}"
+              gh release upload "$release_tag" "$tool_path" --repo "${{ github.repository }}"
+                else
+              echo "No updates for $tool_name, skipping..."
+                fi
+              else
+                echo "Adding $tool_name to existing release..."
+                gh release upload "$release_tag" "$tool_path" --repo "${{ github.repository }}"
+              fi
             fi
-          done
-          
-          echo "UNRELEASED_TOOLS=${MISSING_TOOLS%% }" >> $GITHUB_ENV
-          echo "NEEDS_RELEASE=$([ -n "$MISSING_TOOLS" ] && echo "true" || echo "false")" >> $GITHUB_ENV
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create Release
-        if: env.HAS_CHANGES == 'true' || env.NEEDS_RELEASE == 'true'
-        uses: softprops/action-gh-release@v1
-        with:
-          name: "Release $(date +'%Y.%m.%d')-$(git rev-parse --short HEAD)"
-          body: "Automated release of built tools"
-          files: tools/*.exe
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              done
