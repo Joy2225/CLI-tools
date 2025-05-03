@@ -100,8 +100,8 @@ jobs:
         run: |
           repo="${{ github.repository }}"
 
-          # Get the latest tools-v* tag
-          latest_tag=$(gh release list --repo "$repo" --limit 100 | grep '^tools-v' | cut -f1 | sort -V | tail -n1)
+          # Get the latest tag starting with tools-v using JSON output
+          latest_tag=$(gh release list --repo "$repo" --limit 100 --json tagName | jq -r '.[].tagName' | grep '^tools-v' | sort -V | tail -n1)
 
           if [ -z "$latest_tag" ]; then
             next_version="tools-v1.0.0"
