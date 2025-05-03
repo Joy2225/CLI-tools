@@ -25,6 +25,7 @@ jobs:
 
       - name: Get changed files
         id: changed-files
+        shell: bash  # <--- ADD THIS TO FORCE BASH
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
             git diff --name-only ${{ github.event.before }} ${{ github.sha }} > changed_files.txt
@@ -35,6 +36,7 @@ jobs:
           echo "CHANGED_FILES=$(cat changed_files.txt)" >> $GITHUB_ENV
 
       - name: Build tools
+        shell: bash  # <--- ADD THIS FOR CONSISTENCY
         run: |
           mkdir -p tools
           for tool_dir in buildqbdi frid; do
