@@ -82,14 +82,26 @@ jobs:
       # --- Build Loop ---
       - name: Build Tools
         if: steps.identify_tools.outputs.build_required == 'true'
+        shell: pwsh # Use PowerShell for better Windows compatibility
         run: |
-          # Create tools directory if it doesn't exist
-          mkdir -p tools
+          # Create tools directory at the root if it doesn't exist
+          $toolsDir = Join-Path $env:GITHUB_WORKSPACE 'tools'
+          # --- This is the corrected part ---
+          if (-not (Test-Path $toolsDir)) {
+            New-Item -ItemType Directory -Path $toolsDir | Out-Null
+            Write-Host "Created $toolsDir directory."
+          } else {
+            Write-Host "$toolsDir directory already exists."
+          }
+          # --- End of correction ---
 
-          # Convert comma-separated string back to array (PowerShell specific)
-          $tools = "${{ steps.identify_tools.outputs.tools_built }}".Split(',')
-          foreach ($tool in $tools) {
-            if (-not [string]::IsNullOrEmpty($tool)) {
+          # Get the comma-separated list of tools to build
+          $toolsToBuild = "${{ steps.identify_tools.outputs.tools_built }}".Split(',')
+
+          foreach ($tool in $toolsToBuild) {
+            # (Rest of the build loop remains the same)
+            $toolName = $tool.Trim()
+            if (-not [string]::IsNullOrEmpty($toolName)) {
               Write-Host "Building tool: $tool"
               cd $tool
               if (Test-Path requirements.txt) {
