@@ -54,28 +54,28 @@ jobs:
           done
 
       - name: Auto-release all tools with version increment
-  shell: bash
-  run: |
-    tools_dir="tools"
-    repo="${{ github.repository }}"
+        shell: bash
+        run: |
+          tools_dir="tools"
+          repo="${{ github.repository }}"
 
-    # Get latest version tag starting with tools-v*
-    latest_tag=$(gh release list --repo "$repo" --limit 100 | grep '^tools-v' | cut -f1 | sort -V | tail -n1)
+          # Get latest version tag starting with tools-v*
+          latest_tag=$(gh release list --repo "$repo" --limit 100 | grep '^tools-v' | cut -f1 | sort -V | tail -n1)
 
-    if [ -z "$latest_tag" ]; then
-      next_version="tools-v1.0.0"
-    else
-      # Extract major, minor, patch and increment patch
-      version="${latest_tag#tools-v}"  # Strip 'tools-v'
-      IFS='.' read -r major minor patch <<< "$version"
-      patch=$((patch + 1))
-      next_version="tools-v$major.$minor.$patch"
-    fi
+          if [ -z "$latest_tag" ]; then
+            next_version="tools-v1.0.0"
+          else
+            # Extract major, minor, patch and increment patch
+            version="${latest_tag#tools-v}"  # Strip 'tools-v'
+            IFS='.' read -r major minor patch <<< "$version"
+            patch=$((patch + 1))
+            next_version="tools-v$major.$minor.$patch"
+          fi
 
-    echo "Creating new release: $next_version"
+          echo "Creating new release: $next_version"
 
-    # Create release with all tools
-    gh release create "$next_version" "$tools_dir"/*.exe \
-      --title "Tools ${next_version#tools-v}" \
-      --notes "Release of all tools (auto-versioned)" \
-      --repo "$repo"
+          # Create release with all tools
+          gh release create "$next_version" "$tools_dir"/*.exe \
+            --title "Tools ${next_version#tools-v}" \
+            --notes "Release of all tools (auto-versioned)" \
+            --repo "$repo"
