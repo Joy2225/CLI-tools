@@ -36,7 +36,8 @@ jobs:
             git fetch origin main
             git diff origin/main --name-only > changed_files.txt
           fi
-          echo "CHANGED_FILES=$(cat changed_files.txt)" >> $GITHUB_ENV
+          changed=$(paste -sd' ' changed_files.txt)
+          echo "CHANGED_FILES=$changed" >> $GITHUB_ENV
 
       - name: Build tools
         shell: bash
@@ -50,7 +51,7 @@ jobs:
               echo "Building $tool_dir..."
               cd $tool_dir
               pip install -r requirements.txt
-              pyinstaller --onefile $py_file.py
+              pyinstaller --onefile $py_file
               mv "dist/${tool_dir%/}.exe" "../tools/"
               cd ..
             fi
