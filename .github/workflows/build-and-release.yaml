@@ -76,40 +76,46 @@ jobs:
           path: tools/
 
   release:
-    name: Create GitHub Release
-    needs: build
-    runs-on: ubuntu-latest
+  name: Create GitHub Release
+  needs: build
+  runs-on: ubuntu-latest
 
-    steps:
-      - name: Download all build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: tools
-          path: tools/
+  steps:
+    - name: Download all build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: tools
+        path: tools/
 
-      - name: Generate version tag
-        id: version
-        run: |
-          repo="${{ github.repository }}"
+    - name: Set up GitHub CLI
+      uses: cli/cli-action@v2
 
-          # Get latest version tag starting with tools-v*
-          latest_tag=$(gh release list --repo "$repo" --limit 100 | grep '^tools-v' | cut -f1 | sort -V | tail -n1)
+    - name: Generate version tag
+      id: version
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        repo="${{ github.repository }}"
 
-          if [ -z "$latest_tag" ]; then
-            next_version="tools-v1.0.0"
-          else
-            # Extract major, minor, patch and increment patch
-            version="${latest_tag#tools-v}"  # Strip 'tools-v'
-            IFS='.' read -r major minor patch <<< "$version"
-            patch=$((patch + 1))
-            next_version="tools-v$major.$minor.$patch"
-          fi
+        # Get the latest tools-v* tag
+        latest_tag=$(gh release list --repo "$repo" --limit 100 | grep '^tools-v' | cut -f1 | sort -V | tail -n1)
 
-          echo "VERSION=$next_version" >> $GITHUB_ENV
+        if [ -z "$latest_tag" ]; then
+          next_version="tools-v1.0.0"
+        else
+          version="${latest_tag#tools-v}"  # Strip prefix
+          IFS='.' read -r major minor patch <<< "$version"
+          patch=$((patch + 1))
+          next_version="tools-v$major.$minor.$patch"
+        fi
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.VERSION }}
-          name: Release ${{ env.VERSION }}
-          files: tools/*.exe
+        echo "VERSION=$next_version" >> $GITHUB_ENV
+        echo "Generated version: $next_version"
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ env.VERSION }}
+        name: Release ${{ env.VERSION }}
+        files: tools/*.exe
+        fail_on_unmatched_files: true
