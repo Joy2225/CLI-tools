@@ -57,3 +57,5 @@ buildqbdi <path_to_your_cpp_file>
 ## 🔧 Notes  
 - For Linux/WSL support, contributions are welcome!  
 - Tools are designed for simplicity—modify as needed for your workflow.  
+
+> Doing workflow with AI is a nightmare
