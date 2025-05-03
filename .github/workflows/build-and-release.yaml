@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-and-release:
+  build:
     runs-on: windows-latest
 
     steps:
@@ -53,12 +53,35 @@ jobs:
             fi
           done
 
-      - name: Auto-release all tools with version increment
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Commit built tools
         run: |
-          tools_dir="tools"
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add tools/
+          git commit -m "Add built tools"
+          git push
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tools
+          path: tools/
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: tools
+          path: tools/
+
+      - name: Generate version tag
+        id: version
+        run: |
           repo="${{ github.repository }}"
 
           # Get latest version tag starting with tools-v*
@@ -74,10 +97,11 @@ jobs:
             next_version="tools-v$major.$minor.$patch"
           fi
 
-          echo "Creating new release: $next_version"
+          echo "VERSION=$next_version" >> $GITHUB_ENV
 
-          # Create release with all tools
-          gh release create "$next_version" "$tools_dir"/*.exe \
-            --title "Tools ${next_version#tools-v}" \
-            --notes "Release of all tools (auto-versioned)" \
-            --repo "$repo"
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.VERSION }}
+          name: Release ${{ env.VERSION }}
+          files: tools/*.exe
