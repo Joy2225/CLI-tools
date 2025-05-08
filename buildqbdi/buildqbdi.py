@@ -56,8 +56,8 @@ def main():
             temp = temp[1:]
 
         os.system(f"del {temp}")
-    except Exception as e:
-        print(e)
+    except FileNotFoundError:
+        print(f"Warning: Temporary file \"{temp}\" not found for deletion.")
         
 if __name__ == "__main__":
     main()
