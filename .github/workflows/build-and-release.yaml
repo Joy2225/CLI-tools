@@ -1,15 +1,14 @@
 name: Build and Release Tools
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # Manual trigger only
 
 permissions:
   contents: write
 
 jobs:
-  build:
+  build_windows:
     runs-on: windows-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -21,76 +20,95 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install PyInstaller
-        run: pip install pyinstaller
+      - name: Install dependencies
+        run: |
+          pip install pyinstaller
 
-      - name: Get changed files
-        id: changed-files
+      - name: Build Windows tools
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            git diff --name-only ${{ github.event.before }} ${{ github.sha }} > changed_files.txt
-          else
-            # Manual run: get the previous commit hash on main
-            PREV_SHA=$(git rev-parse HEAD~1)
-            git diff --name-only $PREV_SHA HEAD > changed_files.txt
-          fi
-          changed=$(paste -sd' ' changed_files.txt)
-          echo "CHANGED_FILES=$changed" >> $GITHUB_ENV
+          mkdir -p tools/windows
+          
+          # Build buildqbdi (Windows-only)
+          cd buildqbdi
+          pip install -r requirements.txt
+          pyinstaller --onefile buildqbdi.py
+          mv dist/buildqbdi.exe ../tools/windows/
+          cd ..
+          
+          # Build frid (Windows version)
+          cd frid
+          pip install -r requirements.txt
+          pyinstaller --onefile frid.py
+          mv dist/frid.exe ../tools/windows/
+          cd ..
 
-      - name: Build tools
-        shell: bash
-        run: |
-          mkdir -p tools
-          for tool_dir in */; do
-            py_dir="$tool_dir"
-            py_file="${py_dir%/}.py"
-
-            if grep -q "$py_dir" <<< "$CHANGED_FILES" && [ -f "$py_dir/$py_file" ]; then
-              echo "Building $tool_dir..."
-              cd $tool_dir
-              pip install -r requirements.txt
-              pyinstaller --onefile $py_file
-              mv "dist/${tool_dir%/}.exe" "../tools/"
-              cd ..
-            fi
-          done
-
-      - name: Commit built tools
-        shell: bash
-        run: |
-          if git diff --quiet tools/; then
-            echo "No changes in tools. Skipping commit."
-          else
-            git config user.name "GitHub Actions"
-            git config user.email "actions@github.com"
-            git add tools/
-            git commit -m "Add built tools"
-            git push
-          fi
-
-      - name: Upload build artifacts
+      - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: tools
-          path: tools/
+          name: windows-tools
+          path: tools/windows/
+
+  build_linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libssl-dev
+
+      - name: Install Python dependencies
+        run: |
+          pip install pyinstaller
+
+      - name: Build Linux tools
+        shell: bash
+        run: |
+          mkdir -p tools/linux
+          
+          # Build frid (Linux version)
+          cd frid
+          pip install -r requirements.txt
+          pyinstaller --onefile frid.py
+          mv dist/frid ../tools/linux/
+          cd ..
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-tools
+          path: tools/linux/
 
   release:
-    name: Create GitHub Release
-    needs: build
+    name: Create Release
+    needs: [build_windows, build_linux]
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download all build artifacts
+      - name: Download Windows artifacts
         uses: actions/download-artifact@v4
         with:
-          name: tools
-          path: tools/
+          name: windows-tools
+          path: release_assets/windows
+
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-tools
+          path: release_assets/linux
 
       - name: Install GitHub CLI
         run: |
           sudo apt-get update
-          sudo apt-get install gh
+          sudo apt-get install -y gh
 
       - name: Generate version tag
         id: version
@@ -98,10 +116,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           repo="${{ github.repository }}"
-
-          # Get the latest tag starting with tools-v using JSON output
+          
+          # Get latest tag with tools-v prefix
           latest_tag=$(gh release list --repo "$repo" --limit 100 --json tagName | jq -r '.[].tagName' | grep '^tools-v' | sort -V | tail -n1)
-
+          
           if [ -z "$latest_tag" ]; then
             next_version="tools-v1.0.0"
           else
@@ -110,7 +128,7 @@ jobs:
             patch=$((patch + 1))
             next_version="tools-v$major.$minor.$patch"
           fi
-
+          
           echo "VERSION=$next_version" >> $GITHUB_ENV
           echo "Generated version: $next_version"
 
@@ -119,5 +137,7 @@ jobs:
         with:
           tag_name: ${{ env.VERSION }}
           name: Release ${{ env.VERSION }}
-          files: tools/*.exe
+          files: |
+            release_assets/windows/*
+            release_assets/linux/*
           fail_on_unmatched_files: true

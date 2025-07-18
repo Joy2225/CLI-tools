@@ -2,9 +2,26 @@ import sys
 import os
 import time
 import subprocess
+import platform
+from shutil import which
+import argparse
 
-def check_avd_exists(avd_name):
+def check_os(avd):
+    os_name = platform.system()
+    if os_name == "Windows":
+        return 0
+    elif os_name == "Linux":
+        return 1
+    else:
+        print(f"Operating System: {os_name} (Unrecognized or other OS)")
+        return 2
+
+def check_avd_exists_windows(avd_name):
     avd_path = f"C:\\Users\\{os.getlogin()}\\.android\\avd\\{avd_name}.avd"
+    return os.path.exists(avd_path)
+
+def check_avd_exists_linux(avd_name):
+    avd_path = f"/home/{os.getlogin()}/.android/avd/{avd_name}.ini"
     return os.path.exists(avd_path)
 
 def get_running_avd_serials():
@@ -31,9 +48,33 @@ def start_avd(avd_name):
                     return s
         time.sleep(2)
 
-def launch_shell_command(serial):
+def launch_shell_command_windows(serial):
     cmd = f'start cmd /k "adb -s {serial} shell /data/local/tmp/frida-server"'
     subprocess.Popen(cmd, shell=True)
+
+def launch_shell_command_linux(serial, preferred="kitty"):
+    terminals = {
+        "gnome-terminal": ["--", "adb", "-s", serial, "shell", "/data/local/tmp/frida-server"],
+        "konsole": ["-e", "adb", "-s", serial, "shell", "/data/local/tmp/frida-server"],
+        "xfce4-terminal": ["--command", f"adb -s {serial} shell /data/local/tmp/frida-server"],
+        "xterm": ["-hold", "-e", "adb", "-s", serial, "shell", "/data/local/tmp/frida-server"],
+        "kitty": ["--detach", "bash", "-c", f"adb -s {serial} shell /data/local/tmp/frida-server; exec bash"]
+    }
+
+    if preferred in terminals and which(preferred):
+        print(f"Launching in preferred terminal: {preferred}")
+        subprocess.Popen([preferred] + terminals[preferred])
+        return
+
+    # Fallback
+    for term, args in terminals.items():
+        if which(term):
+            print(f"Preferred terminal not found. Falling back to: {term}")
+            subprocess.Popen([term] + args)
+            return
+
+    print("No supported terminal found. Running command without terminal.")
+    subprocess.Popen(["adb", "-s", serial, "shell", "/data/local/tmp/frida-server"])
 
 def adb_root(target_serial):
     check_root = os.popen(f"adb -s {target_serial} root").read().strip()
@@ -44,15 +85,32 @@ def adb_root(target_serial):
 
 
 def main():
+
+    parser = argparse.ArgumentParser(description="Frida AVD Launcher")
+    parser.add_argument("avd", help="Name of the AVD to launch")
+    parser.add_argument("--term", help="Preferred terminal emulator (e.g. kitty, gnome-terminal, xterm)", default="kitty")
+
+    args = parser.parse_args()
+    avd = args.avd.strip()
+    preferred_terminal = args.term.strip()
+
     print("Welcome to Frida AVD Launcher!!")
     print("This script will start an AVD and run Frida server on it")
-    avd = sys.argv[1].strip()
-    if not avd:
-        print("Usage: frid <avd_name>")
-        sys.exit(1)
 
-    if not check_avd_exists(avd):
-        print(f"AVD '{avd}' does not exist.")
+    os_check = check_os(avd)
+    if os_check == 2:
+        print("Unsupported operating system. Please use Windows or Linux.")
+        sys.exit(1)
+    elif os_check == 0:
+        if not check_avd_exists_windows(avd):
+            print(f"AVD '{avd}' does not exist.")
+            sys.exit(1)
+    elif os_check == 1:
+        if not check_avd_exists_linux(avd):
+            print(f"AVD '{avd}' does not exist.")
+            sys.exit(1)
+    else:
+        print("Error checking AVD existence.")
         sys.exit(1)
 
     serials = get_running_avd_serials()
@@ -74,7 +132,13 @@ def main():
 
     print("ADB is now running as root.")
 
-    launch_shell_command(target_serial)
+    if os_check == 0:
+        launch_shell_command_windows(target_serial)
+    elif os_check == 1:
+        launch_shell_command_linux(target_serial, preferred_terminal)
+    else:
+        print("Unsupported operating system for launching shell command.")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
